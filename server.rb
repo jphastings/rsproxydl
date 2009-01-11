@@ -2,46 +2,32 @@ require 'rubygems'
 require 'rsbundler'
 require 'open-uri'
 require 'mongrel'
-require 'plist'
 require 'rar'
 require 'digest'
-require 'uri'
+require 'downloader'
+
+$useragent = "RSProxy (0.0.1)"
 
 server = Mongrel::HttpServer.new("127.0.0.1", "15685")
 
-class RSProxyServer < Mongrel::HttpHandler
-  def initialize
-    @useragent = "RSProxy"
-    
-    if File.exists?("rapidshare.cookie")
-      @cookie = open("rapidshare.cookie").read
-    else
-      # Need to make this work for other operating systems / users
-      Plist::parse_xml("/Users/jp/Library/Cookies/Cookies.plist").each do |hash|
-        if hash['Domain'] =~ /rapidshare\.com$/
-          @cookie = "user="+hash['Value']
-          break
-        end
-      end
-      open("rapidshare.cookie","w").print @cookie
-    end
-  end
-  
+class RSProxyDownloader < Mongrel::HttpHandler
   def process(req,res)
     if req.params['REQUEST_URI'] =~ /\/download\/(.+)/
       bundleurl = "http://"+$1
       
       begin
-        bundletext = open(bundleurl,"User-agent"=>@useragent).read
+        bundletext = open(bundleurl,"User-agent"=>$useragent).read
       rescue
-        res.body = "There was an error getting your bundle"
+        # 404 not found
+        # Bundle is not there
         return
       end
       
       begin
         bundle = RSBundle.new(bundletext)
       rescue
-        res.body = "There was an error parsing your bundle"
+        # invalid request
+        # Bundle is not valid
         return
       end
       
@@ -65,32 +51,33 @@ class RSProxyServer < Mongrel::HttpHandler
 
         details = nil
         downloads = []
-        urls.each do |url|
+        urls.each_with_index do |url,num|
           filename = url.gsub(/^.+\/(.+?)$/,"\\1")
           downloads.push(filename)
-
-          puts `curl -q -b "#{@cookie}\" -A "#{@useragent}" -L -o "downloads/#{dir}/#{filename}" #{url}`
-
-          if details.nil?
-            files = Rar.new("downloads/#{dir}/#{filename}").files
-
-            details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0] if not files.empty?
-            res.status = 200
-            res.header["Content-Length"] = details[1]
-            res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
-            res.send_status
-            res.send_header
-          end
-
-          if details.nil?
-            # You're probably over your daily limit, the file is dead or you're not logged in.
-            raise "Not a valid rar."
-          end
+          
+          if num == 0
+            $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,"downloads/#{dir}/#{filename}",lambda{|got_details|
+              details = got_details
+              res.status = 200
+              res.header["Content-Length"] = details[1]
+              res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
+              res.send_status
+              res.send_header
+            })
+            if details.nil?
+              # You're probably over your daily limit, the file is dead or you're not logged in.
+              raise "Not a valid rar."
+            end
+          else
+            $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,"downloads/#{dir}/#{filename}")
+          end          
         end
 
         Rar.new("downloads/#{dir}/#{downloads[0]}",bundle.files[0].password).extract("extract/#{dir}/")
 
         settings = open("extract/#{dir}/.rsproxy","w")
+        details.push(bundleurl)
+        details.push(bundletext)
         settings.write(details.join("\n"))
         settings.close
 
@@ -99,17 +86,17 @@ class RSProxyServer < Mongrel::HttpHandler
       res.write open("./extract/#{dir}/#{details[0]}").read
       
       return
-    else
-      # do 404
-      res.body = "That bundle could not be found"
-      return
     end
+  else
+    # Malformed Request (no bundle url given)
   end
   
 end
 
-server.register("/",Mongrel::DirHandler.new("./docs/"))
-server.register("/download/",RSProxyServer.new)
-server.register("/ready/",Mongrel::DirHandler.new("./extract/"))
+puts "Setting up the downloader..."
+$dlr = Downloader.new
 
+puts "Starting the Server..."
+server.register("/",Mongrel::DirHandler.new("./docs/"))
+server.register("/download/",RSProxyDownloader.new)
 server.run.join
