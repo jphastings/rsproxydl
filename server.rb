@@ -18,16 +18,18 @@ class RSProxyDownloader < Mongrel::HttpHandler
       begin
         bundletext = open(bundleurl,"User-agent"=>$useragent).read
       rescue
-        # 404 not found
-        # Bundle is not there
+        res.start(404) do |head,out|
+          out.write("The bundle you requested does not exist.\n")
+        end
         return
       end
       
       begin
         bundle = RSBundle.new(bundletext)
       rescue
-        # invalid request
-        # Bundle is not valid
+        res.start(400) do |head,out|
+          out.write("The file you asked for is not a bundle.\n")
+        end
         return
       end
       
@@ -86,9 +88,11 @@ class RSProxyDownloader < Mongrel::HttpHandler
       res.write open("./extract/#{dir}/#{details[0]}").read
       
       return
+    else
+      res.start(400) do |head,out|
+        out.write("You must specify a bundle. See <a href=\"/\">the root</a> for documentation.\n")
+      end
     end
-  else
-    # Malformed Request (no bundle url given)
   end
   
 end
