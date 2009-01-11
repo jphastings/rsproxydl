@@ -3,6 +3,7 @@ require 'rsbundler'
 require 'open-uri'
 require 'webrick'
 require 'plist'
+require 'rar'
 
 server = WEBrick::HTTPServer.new(
   :Port => 15685,
@@ -18,7 +19,7 @@ class RSProxyServer < WEBrick::HTTPServlet::AbstractServlet
     else
       Plist::parse_xml("/Users/jp/Library/Cookies/Cookies.plist").each do |hash|
         if hash['Domain'] =~ /rapidshare\.com$/
-          @cookie = hash['Value']
+          @cookie = "user="+hash['Value']
           break
         end
       end
@@ -57,13 +58,11 @@ class RSProxyServer < WEBrick::HTTPServlet::AbstractServlet
     # We can only cope with single files at the moment, so we take the first file in the bundle.
     urls = bundle.files[0].links
 
-    pw = (bundle.files[0].password.nil?) ? "" : " -p#{bundle.files[0].password}"
-
     puts "Downloading #{bundle.name} // #{bundle.files[0].name}"
 
     dir = bundle.files[0].name
     
-    FileUtils.mkdir("downloads/#{dir}/")
+    FileUtils.mkdir_p("downloads/#{dir}/")
 
     details = nil
     downloads = []
@@ -72,23 +71,35 @@ class RSProxyServer < WEBrick::HTTPServlet::AbstractServlet
       downloads.push(filename)
 
       download = open("downloads/#{dir}/#{filename}","w")
-      open(url,"Cookie"=>@cookie,"User-agent"=>@useragent).each_line { |line| 
-        if details.nil? and download.pos > 4096
-          files = `unrar l#{pw} "downloads/#{dir}/#{filename}"`.scan(/\n (.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
-
-          details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0]
+      open(url,"Cookie"=>@cookie,"User-agent"=>@useragent).each_char { |chunk| 
+        if details.nil? and download.pos > 1024
+          files = `unrar l#{pw} "downloads/#{dir}/#{filename}"`.scan(/\n\s*\*?(.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
+          details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0] if not files.empty?
+          res.header['Content-length'] = details[1]
         end
-        download.write line
+        download.write chunk
       }
       download.close
+      
+      # Final attempt
+      if details.nil?
+        files = Rar.new("downloads/#{dir}/#{filename}").files
+
+        details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0] if not files.empty?
+      end
+      
+      if details.nil?
+        # You're probably over your daily limit, the file is dead or you're not logged in.
+        raise "Not a valid rar."
+      end
+      
     end
 
-    #{}`unrar x#{pw} -y downloads/#{dir}/#{downloads[0]} extract/#{dir}/`
+    Rar.new("downloads/#{dir}/#{downloads[0]}",bundle.files[0].password).extract("extract/#{dir}")
 
-    #FileUtils.rm_r("downloads/#{dir}")
-    p details
-    while not File.exist?("extract/#{dir}/#{details[0]}")
-      sleep 1
+    FileUtils.rm_r("downloads/#{dir}")
+    if not File.exist?("extract/#{dir}/#{details[0]}")
+      raise "The file we expect to be there has gone!"
     end
     open("extract/#{dir}/#{details[0]}").read
   end
