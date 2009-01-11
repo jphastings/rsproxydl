@@ -4,6 +4,8 @@ require 'open-uri'
 require 'webrick'
 require 'plist'
 require 'rar'
+require 'digest'
+require 'uri'
 
 server = WEBrick::HTTPServer.new(
   :Port => 15685,
@@ -45,7 +47,7 @@ class RSProxyServer < WEBrick::HTTPServlet::AbstractServlet
         return
       end
       
-      res.body = downloadbundle(bundle)
+      res.body = downloadbundle(bundle,res)
       return
     else
       # do 404
@@ -54,60 +56,64 @@ class RSProxyServer < WEBrick::HTTPServlet::AbstractServlet
     end
   end
     
-  def downloadbundle(bundle)
-    # We can only cope with single files at the moment, so we take the first file in the bundle.
-    urls = bundle.files[0].links
-
-    puts "Downloading #{bundle.name} // #{bundle.files[0].name}"
-
-    dir = bundle.files[0].name
+  def downloadbundle(bundle,res)
+    dir = Digest::SHA1.hexdigest(bundle.files.join("|"))
     
-    FileUtils.mkdir_p("downloads/#{dir}/")
+    if File.directory?("extract/#{dir}")
+      details = open("extract/#{dir}/.rsproxy").read.split("\n")
+    else
+      # We can only cope with single files at the moment, so we take the first file in the bundle.
+      urls = bundle.files[0].links
 
-    details = nil
-    downloads = []
-    urls.each do |url|
-      filename = url.gsub(/^.+\/(.+?)$/,"\\1")
-      downloads.push(filename)
+      puts "Downloading #{bundle.name} // #{bundle.files[0].name}"
 
-      download = open("downloads/#{dir}/#{filename}","w")
-      open(url,"Cookie"=>@cookie,"User-agent"=>@useragent).each_char { |chunk| 
-        if details.nil? and download.pos > 1024
-          files = `unrar l#{pw} "downloads/#{dir}/#{filename}"`.scan(/\n\s*\*?(.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
-          details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0] if not files.empty?
-          res.header['Content-length'] = details[1]
+      FileUtils.mkdir_p("downloads/#{dir}/")
+
+      details = nil
+      downloads = []
+      urls.each do |url|
+        filename = url.gsub(/^.+\/(.+?)$/,"\\1")
+        downloads.push(filename)
+        
+        if File.exists?("downloads/#{dir}/#{filename}")
+          # The file exists, is it partially downloaded?
+          have = open("downloads/#{dir}/#{filename}").size
+          
+          #finish me!
         end
-        download.write chunk
-      }
-      download.close
-      
-      # Final attempt
-      if details.nil?
-        files = Rar.new("downloads/#{dir}/#{filename}").files
+        
+        download = open("downloads/#{dir}/#{filename}","w")
+        download.write open(url,"Cookie"=>@cookie,"User-agent"=>@useragent).read
+        download.close
 
-        details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0] if not files.empty?
+        if details.nil?
+          files = Rar.new("downloads/#{dir}/#{filename}").files
+
+          details = files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0] if not files.empty?
+        end
+
+        if details.nil?
+          # You're probably over your daily limit, the file is dead or you're not logged in.
+          raise "Not a valid rar."
+        end
       end
-      
-      if details.nil?
-        # You're probably over your daily limit, the file is dead or you're not logged in.
-        raise "Not a valid rar."
-      end
-      
-    end
 
-    Rar.new("downloads/#{dir}/#{downloads[0]}",bundle.files[0].password).extract("extract/#{dir}")
-
-    FileUtils.rm_r("downloads/#{dir}")
-    if not File.exist?("extract/#{dir}/#{details[0]}")
-      raise "The file we expect to be there has gone!"
+      Rar.new("downloads/#{dir}/#{downloads[0]}",bundle.files[0].password).extract("extract/#{dir}/")
+      
+      open("extract/#{dir}/.rsproxy","w").write(details.join("\n"))
+      
+      FileUtils.rm_r("downloads/#{dir}")
     end
-    open("extract/#{dir}/#{details[0]}").read
+    res.set_redirect(WEBrick::HTTPStatus::MovedPermanently,"/ready/#{dir}/"+URI.escape(details[0]))
+    #res.header['Location'] = "/ready/#{dir}/#{details[0]}"
   end
 
   
 end
 
 server.mount("/download/",RSProxyServer)
+server.mount("/ready/",WEBrick::HTTPServlet::FileHandler, Dir::pwd + "/extract/",true)
 
-trap("INT"){ s.shutdown }
+
+trap("INT"){ server.shutdown }
 server.start

@@ -1,21 +1,19 @@
 class Rar
   def initialize(filename,password = nil)
+    if not File.exists?(filename)
+      raise "That rar doesn't exist"
+    end
     @password = password
     @filename = filename
   end
   
   def files
-    `unrar l "#{@filename}"`.scan(/\n \*?(.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
+    `unrar l "#{@filename}"`.scan(/\n\s*\*?(.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
   end
   
   def extract(destinationdir = "")
-    switch = pw
-    `unrar x#{pw} -y #{@filename} #{destinationdir}`
+    pw = (@password.nil?) ? "-" : @password
+    `unrar x -p#{pw} -y #{@filename} #{destinationdir}/`
   end
   
-  private
-  
-  def pw
-    (@password.nil?) ? "" : " -p#{@password}"
-  end  
 end
