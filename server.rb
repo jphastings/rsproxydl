@@ -104,7 +104,7 @@ class RSProxyAdmin < Mongrel::HttpHandler
     res.start(200) do |head,out|
       out.write("Downloads\n---------\n")
       $dlr.running.each do |dl|
-        out.write dl[:name]+" "
+        out.write ((dl[:name].length > 50) ? dl[:name] : dl[:name][0..47]+"...").ljust(51," ")
         if dl[:size].nil?
           out.write "|"+(" -"*22)+" | --:--\n"
         else
