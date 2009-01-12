@@ -15,3 +15,6 @@ h3. Pros
 h3. Cons
 
 * Requires that the rar files are kept in their entirety til the end of the download.
+
+*New*
+The current implementation somehow adds extra bytes to the final stream - debug!
