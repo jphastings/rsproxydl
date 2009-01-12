@@ -50,33 +50,43 @@ class RSProxyDownloader < Mongrel::HttpHandler
         res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
         res.send_status
         res.send_header
+        open("./extract/#{dir}/#{details[0]}").each_char do |char|
+          res.write char
+        end
       else
         puts "Downloading #{bundle.name} // #{bundle.files[0].name}"
 
         FileUtils.mkdir_p("downloads/#{dir}/")
 
         details = nil
+        extracted = 0
         downloads = []
         urls.each_with_index do |url,num|
           filename = url.gsub(/^.+\/(.+?)$/,"\\1")
           downloads.push(filename)
-          
-          if num == 0
-            $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,"downloads/#{dir}/#{filename}",lambda{|dest|
+          puts "#{bundle.files[0].name} #{num + 1} / #{urls.length}"
+          dest = "downloads/#{dir}/#{filename}"
+          $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,dest,
+          lambda{
+            if details.nil?
               details = Rar.new(dest,bundle.files[0].password).files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0]
+              
+              if details.nil?
+                # You're probably over your daily limit, the file is dead or you're not logged in.
+                raise "Not a valid rar."
+              end
+              
               res.status = 200
               res.header["Content-Length"] = details[1]
               res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
               res.send_status
               res.send_header
-            })
-            if details.nil?
-              # You're probably over your daily limit, the file is dead or you're not logged in.
-              raise "Not a valid rar."
+            else
+              newdata = Rar.new(dest,bundle.files[0].password).extract_file(details[0],extracted)
+              extracted += newdata.length
+              res.write newdata
             end
-          else
-            $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,"downloads/#{dir}/#{filename}")
-          end          
+          })                  
         end
 
         Rar.new("downloads/#{dir}/#{downloads[0]}",bundle.files[0].password).extract("extract/#{dir}/")
@@ -89,11 +99,7 @@ class RSProxyDownloader < Mongrel::HttpHandler
         settings.close
 
         FileUtils.rm_r("downloads/#{dir}")
-      end
-      open("./extract/#{dir}/#{details[0]}").each_char do |char|
-        res.write char
-      end
-      
+      end      
       return
     else
       res.start(400) do |head,out|

@@ -23,10 +23,10 @@ class Downloader
     end
   end
   
-  def start(name,url,dest,f_afterhead = nil)
+  def start(name,url,dest,f_afterhead)
     # Fix this so it does resuming if a download was stopped half way through
     if File.exists? dest
-      f_afterhead.call(dest)
+      f_afterhead.call
       return
     end
     status = {:name=>name,:complete=>0,:size=>nil,:started=>Time.new.to_i}
@@ -35,8 +35,6 @@ class Downloader
     
     download = open(dest,"w")
     
-    dohead = (f_afterhead.nil?) ? false : true
-        
     req = Net::HTTP::Get.new(path.path)
     req.add_field("Cookie",@cookie)
     req.add_field("User-agent",$useragent)
@@ -61,9 +59,8 @@ class Downloader
           download.write chunk
           status[:complete] = download.pos
           
-          if dohead and download.pos > 128 #got enough of the rar archive to test it
-            f_afterhead.call(dest)
-            dohead = false
+          if download.pos > 128 #got enough of the rar archive to test it, and/or extract as much as we can
+            f_afterhead.call
           end
         end
       }

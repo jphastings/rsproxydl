@@ -17,4 +17,10 @@ class Rar
     `unrar x -p#{pw} -y #{@filename} #{destinationdir}/`
   end
   
+  def extract_file(file,offset = 0)
+    offset += 1
+    pw = (@password.nil?) ? "-" : "\"#{@password}\""
+    #puts "unrar p -p#{pw} -ierr -n\"#{file}\" #{@filename} | tail -c +#{offset}"
+    `unrar p -p#{pw} -ierr -n"#{file}" #{@filename} | tail -c +#{offset}`
+  end
 end
