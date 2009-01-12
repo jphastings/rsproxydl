@@ -11,6 +11,8 @@ $useragent = "RSProxy (0.0.2)"
 
 server = Mongrel::HttpServer.new("127.0.0.1", "15685")
 
+#$transfers = []
+
 class RSProxyDownloader < Mongrel::HttpHandler
   def process(req,res)
     if req.params['REQUEST_URI'] =~ /^\/download\/(.+)$/
@@ -34,21 +36,21 @@ class RSProxyDownloader < Mongrel::HttpHandler
         return
       end
       
-      dir = Digest::SHA1.hexdigest(bundle.files.join("|"))
+      # We can only cope with single files at the moment, so we take the first file in the bundle.
+      urls = bundle.files[0].links
+      
+      dir = Digest::SHA1.hexdigest(urls.join("|"))
 
       if File.exists?("extract/#{dir}/.rsproxy")
+        puts "Passing back #{bundle.name} // #{bundle.files[0].name}"
         details = open("extract/#{dir}/.rsproxy").read.split("\n")
         
         res.status = 200
         res.header["Content-Length"] = details[1]
         res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
-        res.header["Content-type"] = "audio/mpeg"
         res.send_status
         res.send_header
       else
-        # We can only cope with single files at the moment, so we take the first file in the bundle.
-        urls = bundle.files[0].links
-
         puts "Downloading #{bundle.name} // #{bundle.files[0].name}"
 
         FileUtils.mkdir_p("downloads/#{dir}/")
@@ -65,7 +67,6 @@ class RSProxyDownloader < Mongrel::HttpHandler
               res.status = 200
               res.header["Content-Length"] = details[1]
               res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
-              res.header["Content-type"] = "audio/mpeg"
               res.send_status
               res.send_header
             })
@@ -82,13 +83,16 @@ class RSProxyDownloader < Mongrel::HttpHandler
 
         settings = open("extract/#{dir}/.rsproxy","w")
         details.push(bundleurl)
+        details.push(Time.now.to_i)
         details.push(bundletext)
         settings.write(details.join("\n"))
         settings.close
 
         FileUtils.rm_r("downloads/#{dir}")
       end
-      res.write open("./extract/#{dir}/#{details[0]}").read
+      open("./extract/#{dir}/#{details[0]}").each_char do |char|
+        res.write char
+      end
       
       return
     else
@@ -104,7 +108,7 @@ class RSProxyAdmin < Mongrel::HttpHandler
     res.start(200) do |head,out|
       out.write("Downloads\n---------\n")
       $dlr.running.each do |dl|
-        out.write ((dl[:name].length > 50) ? dl[:name] : dl[:name][0..47]+"...").ljust(51," ")
+        out.write(((dl[:name].length > 50) ? dl[:name] : dl[:name][0..47]+"...").ljust(51," "))
         if dl[:size].nil?
           out.write "|"+(" -"*22)+" | --:--\n"
         else

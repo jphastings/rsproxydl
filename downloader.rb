@@ -24,6 +24,11 @@ class Downloader
   end
   
   def start(name,url,dest,f_afterhead = nil)
+    # Fix this so it does resuming if a download was stopped half way through
+    if File.exists? dest
+      f_afterhead.call(dest)
+      return
+    end
     status = {:name=>name,:complete=>0,:size=>nil,:started=>Time.new.to_i}
     @running.push(status)
     path = URI.parse(url)
