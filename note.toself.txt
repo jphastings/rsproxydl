@@ -1,0 +1,17 @@
+@unrar x -kb -ierr -n"File_to_be_extracted" archive.rar@
+
+Will throw an error to StdErr (is that a problem?) But will create a file (of teh same name as the file being extracted) containing the data so far.
+
+@unrar p -ierr -n"File_to_be_extracted" archive.rar@
+
+Does the same but prints the data so far to stdout! This could work, take the data so far and push it to the client, keep track of how many bytes have been sent then only add the new bytes when a new part of the archive is available.
+
+Once the rar is complete, the remaining (possibly all, depending on settings) files can be extracted to a download directory so they can be stored or similar.
+
+h3. Pros
+
+* Allows streaming download
+
+h3. Cons
+
+* Requires that the rar files are kept in their entirety til the end of the download.
