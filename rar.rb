@@ -8,11 +8,12 @@ class Rar
   end
   
   def files
-    `unrar l "#{@filename}"`.scan(/\n\s*\*?(.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
+    pw = (@password.nil?) ? "-" : "\"#{@password}\""
+    `unrar l -p#{pw} "#{@filename}"`.scan(/\n\s*\*?(.+?)\s+([0-9]+)\s+[0-9]+\s+/).to_a[0..-2]
   end
   
   def extract(destinationdir = "")
-    pw = (@password.nil?) ? "-" : @password
+    pw = (@password.nil?) ? "-" : "\"#{@password}\""
     `unrar x -p#{pw} -y #{@filename} #{destinationdir}/`
   end
   

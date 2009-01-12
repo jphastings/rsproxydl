@@ -5,14 +5,15 @@ require 'mongrel'
 require 'rar'
 require 'digest'
 require 'downloader'
+require 'time'
 
-$useragent = "RSProxy (0.0.1)"
+$useragent = "RSProxy (0.0.2)"
 
 server = Mongrel::HttpServer.new("127.0.0.1", "15685")
 
 class RSProxyDownloader < Mongrel::HttpHandler
   def process(req,res)
-    if req.params['REQUEST_URI'] =~ /\/download\/(.+)/
+    if req.params['REQUEST_URI'] =~ /^\/download\/(.+)$/
       bundleurl = "http://"+$1
       
       begin
@@ -41,6 +42,7 @@ class RSProxyDownloader < Mongrel::HttpHandler
         res.status = 200
         res.header["Content-Length"] = details[1]
         res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
+        res.header["Content-type"] = "audio/mpeg"
         res.send_status
         res.send_header
       else
@@ -58,11 +60,12 @@ class RSProxyDownloader < Mongrel::HttpHandler
           downloads.push(filename)
           
           if num == 0
-            $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,"downloads/#{dir}/#{filename}",lambda{|got_details|
-              details = got_details
+            $dlr.start("#{bundle.name} [#{num + 1}/#{urls.length}]",url,"downloads/#{dir}/#{filename}",lambda{|dest|
+              details = Rar.new(dest,bundle.files[0].password).files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0]
               res.status = 200
               res.header["Content-Length"] = details[1]
               res.header["Content-Disposition"] = "inline; filename=#{details[0]}"
+              res.header["Content-type"] = "audio/mpeg"
               res.send_status
               res.send_header
             })
@@ -94,7 +97,31 @@ class RSProxyDownloader < Mongrel::HttpHandler
       end
     end
   end
-  
+end
+
+class RSProxyAdmin < Mongrel::HttpHandler
+  def process(req,res)
+    res.start(200) do |head,out|
+      out.write("Downloads\n---------\n")
+      $dlr.running.each do |dl|
+        out.write dl[:name]+" "
+        if dl[:size].nil?
+          out.write "|"+(" -"*22)+" | --:--\n"
+        else
+          taken = (Time.new.to_i - dl[:started])
+          left = dl[:size] - dl[:complete]
+          av_speed = dl[:complete]/taken
+          
+          remaining = left / av_speed
+          min = (remaining / 60).to_i.to_s.rjust(2,"0")
+          sec = (remaining % 60).to_i.to_s.rjust(2,"0")
+          done =  ((dl[:complete]*45) / dl[:size])
+          out.write "|"+(">"*done)+("-"*(45-done))+"| #{min}:#{sec} @ "+(av_speed / 1024).to_s+"KBps\n"
+        end
+        out.write"\n"
+      end
+    end
+  end
 end
 
 puts "Setting up the downloader..."
@@ -103,4 +130,5 @@ $dlr = Downloader.new
 puts "Starting the Server..."
 server.register("/",Mongrel::DirHandler.new("./docs/"))
 server.register("/download/",RSProxyDownloader.new)
+server.register("/info/",RSProxyAdmin.new)
 server.run.join

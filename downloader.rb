@@ -2,8 +2,10 @@ require 'rubygems'
 require 'net/http'
 require 'uri'
 require 'plist'
+require 'time'
 
 class Downloader
+  attr_reader :running
   def initialize
     @running = []
     
@@ -22,9 +24,8 @@ class Downloader
   end
   
   def start(name,url,dest,f_afterhead = nil)
-    status = {:name=>name,:complete=>0,:size=>nil}
+    status = {:name=>name,:complete=>0,:size=>nil,:started=>Time.new.to_i}
     @running.push(status)
-    
     path = URI.parse(url)
     
     download = open(dest,"w")
@@ -50,12 +51,13 @@ class Downloader
     
     Net::HTTP.start(path.host, path.port) {|http|
       http.request(req) {|res|
+        status[:size] = res.content_length
         res.read_body do |chunk|
           download.write chunk
           status[:complete] = download.pos
           
           if dohead and download.pos > 128 #got enough of the rar archive to test it
-            f_afterhead.call(Rar.new(dest).files.sort {|y,x| x[1].to_i <=> y[1].to_i}[0])
+            f_afterhead.call(dest)
             dohead = false
           end
         end
